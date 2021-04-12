@@ -1,16 +1,17 @@
 import NIO
 import Logging
-let line = "12345678901234567890123456789012345678901234567890123456789012345678901234567890"
 
+let line = "1234567890123456789012345678901234567890"
 private final class EchoHandler: ChannelInboundHandler {
     public typealias InboundIn = ByteBuffer
     public typealias OutboundOut = ByteBuffer
-//    public typealias InboundIn = AddressedEnvelope<ByteBuffer>
-//    public typealias OutboundOut = AddressedEnvelope<ByteBuffer>
     
     let logger = Logger(label: "myServer EchoHandler")
     private var numBytes = 0
-
+    let iterations = 1_000
+    let outerIterations = 50_000
+    var currentIteration = 1
+    let lineLength = line.count
     public func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         if self.numBytes == 0 {
             logger.info("T3")
@@ -23,12 +24,13 @@ private final class EchoHandler: ChannelInboundHandler {
 
     public func channelReadComplete(context: ChannelHandlerContext) {
 
-        let buffer = context.channel.allocator.buffer(string: line)
-
-        if self.numBytes >= 10_000_000 * 40 {
-            logger.info("T4")
+        if self.numBytes >= iterations * currentIteration * lineLength {
+            let buffer = context.channel.allocator.buffer(string: line)
             context.write(self.wrapOutboundOut(buffer), promise: nil)
-//            context.close(promise: nil)
+            currentIteration += 1
+        }
+        if self.numBytes >= iterations * outerIterations * lineLength {
+            logger.info("T4")
         }
         context.flush()
     }
@@ -45,25 +47,14 @@ struct myServer {
 
     func run() throws {
         let bootstrap = ServerBootstrap(group: eventLoopGroup)
-            // Specify backlog and enable SO_REUSEADDR for the server itself
             .serverChannelOption(ChannelOptions.backlog, value: 16)
             .serverChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
-
-            // Set the handlers that are appled to the accepted Channels
             .childChannelInitializer { channel in
-                // Ensure we don't read faster than we can write by adding the BackPressureHandler into the pipeline.
-//                channel.pipeline.addHandler(BackPressureHandler()).flatMap { v in
                     channel.pipeline.addHandler(EchoHandler())
-//                }
             }
-
-            // Enable SO_REUSEADDR for the accepted Channels
             .childChannelOption(ChannelOptions.socketOption(.so_reuseaddr), value: 1)
-            .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 32)
-            .childChannelOption(ChannelOptions.recvAllocator, value: AdaptiveRecvByteBufferAllocator())
-//        defer {
-//            try! eventLoopGroup.syncShutdownGracefully()
-//        }
+            .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 16)
+            .childChannelOption(ChannelOptions.recvAllocator, value: AdaptiveRecvByteBufferAllocator(minimum: 1024, initial: 2048, maximum: 1024*1024))
 
         // First argument is the program path
         let arguments = CommandLine.arguments
